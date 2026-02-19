@@ -2,6 +2,22 @@
 
 A GPS mapping tool for uploading, archiving, and visualizing GPS tracks using DuckDB geospatial database and Kepler.gl visualization.
 
+## Quick Start
+
+**Option 1: Use the quick start script**
+```bash
+./quickstart.sh
+```
+
+**Option 2: Manual setup**
+```bash
+pip install -r requirements.txt
+python test_gps_tool.py  # Run tests
+streamlit run app.py     # Start the app
+```
+
+Then open your browser at `http://localhost:8501` and upload `sample_gps_track.csv` to see it in action!
+
 ## Features
 
 - 📤 **CSV Upload**: Upload GPS tracks from CSV files
