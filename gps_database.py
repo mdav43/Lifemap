@@ -26,39 +26,68 @@ class GPSDatabase:
         """Initialize database connection and create tables if needed."""
         self.conn = duckdb.connect(self.db_path)
         
-        # Install and load spatial extension
-        self.conn.execute("INSTALL spatial;")
-        self.conn.execute("LOAD spatial;")
+        # Try to install and load spatial extension
+        try:
+            self.conn.execute("INSTALL spatial;")
+        except Exception as e:
+            # Spatial extension may already be installed or network error
+            print(f"Note: Spatial extension install attempted: {e}")
+        
+        try:
+            self.conn.execute("LOAD spatial;")
+        except Exception as e:
+            print(f"Warning: Could not load spatial extension: {e}")
+            print("Continuing without spatial indexing...")
         
         # Create GPS tracks table with geospatial support
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS gps_tracks (
-                id INTEGER PRIMARY KEY,
-                track_name VARCHAR,
-                latitude DOUBLE,
-                longitude DOUBLE,
-                altitude DOUBLE,
-                timestamp TIMESTAMP,
-                speed DOUBLE,
-                uploaded_at TIMESTAMP,
-                source_file VARCHAR,
-                geom GEOMETRY
-            );
-        """)
+        # Use simpler schema if spatial extension is not available
+        try:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS gps_tracks (
+                    id INTEGER PRIMARY KEY,
+                    track_name VARCHAR,
+                    latitude DOUBLE,
+                    longitude DOUBLE,
+                    altitude DOUBLE,
+                    timestamp TIMESTAMP,
+                    speed DOUBLE,
+                    uploaded_at TIMESTAMP,
+                    source_file VARCHAR,
+                    geom GEOMETRY
+                );
+            """)
+            self.has_spatial = True
+        except Exception:
+            # Fallback without geometry column
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS gps_tracks (
+                    id INTEGER PRIMARY KEY,
+                    track_name VARCHAR,
+                    latitude DOUBLE,
+                    longitude DOUBLE,
+                    altitude DOUBLE,
+                    timestamp TIMESTAMP,
+                    speed DOUBLE,
+                    uploaded_at TIMESTAMP,
+                    source_file VARCHAR
+                );
+            """)
+            self.has_spatial = False
         
         # Create sequence for auto-incrementing IDs
         self.conn.execute("""
             CREATE SEQUENCE IF NOT EXISTS gps_tracks_id_seq START 1;
         """)
         
-        # Create index on geospatial column for faster queries
-        try:
-            self.conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_gps_geom ON gps_tracks USING RTREE (geom);
-            """)
-        except Exception:
-            # RTREE index may not be available in all DuckDB versions
-            pass
+        # Create index on geospatial column for faster queries if spatial is available
+        if self.has_spatial:
+            try:
+                self.conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_gps_geom ON gps_tracks USING RTREE (geom);
+                """)
+            except Exception:
+                # RTREE index may not be available in all DuckDB versions
+                pass
     
     def import_from_csv(self, csv_path: str, track_name: Optional[str] = None) -> int:
         """
@@ -104,22 +133,38 @@ class GPSDatabase:
                    'timestamp', 'speed', 'uploaded_at', 'source_file']
         df = df[columns]
         
-        # Insert data into DuckDB
-        self.conn.execute("""
-            INSERT INTO gps_tracks 
-            SELECT 
-                nextval('gps_tracks_id_seq') as id,
-                track_name,
-                latitude,
-                longitude,
-                altitude,
-                timestamp,
-                speed,
-                uploaded_at,
-                source_file,
-                ST_Point(longitude, latitude) as geom
-            FROM df
-        """)
+        # Insert data into DuckDB with or without geom column
+        if self.has_spatial:
+            self.conn.execute("""
+                INSERT INTO gps_tracks 
+                SELECT 
+                    nextval('gps_tracks_id_seq') as id,
+                    track_name,
+                    latitude,
+                    longitude,
+                    altitude,
+                    timestamp,
+                    speed,
+                    uploaded_at,
+                    source_file,
+                    ST_Point(longitude, latitude) as geom
+                FROM df
+            """)
+        else:
+            self.conn.execute("""
+                INSERT INTO gps_tracks 
+                SELECT 
+                    nextval('gps_tracks_id_seq') as id,
+                    track_name,
+                    latitude,
+                    longitude,
+                    altitude,
+                    timestamp,
+                    speed,
+                    uploaded_at,
+                    source_file
+                FROM df
+            """)
         
         return len(df)
     
